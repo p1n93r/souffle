@@ -46,7 +46,7 @@ jobs:
           git checkout 6f29f12e82a8293156836ad81cc9bf5af41fe836
           bootstrap-vcpkg.bat -disableMetrics
 
-      - name: Configure Build (Static Linking)
+      - name: Configure Build
         working-directory: ${{ github.workspace }}
         run: |
           $env:ChocolateyInstall = Convert-Path "$((Get-Command choco).Path)\..\.."
@@ -54,11 +54,11 @@ jobs:
           refreshenv
           cmake -S . -B build -G "Visual Studio 17 2022" -A x64 `
             "-DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake" `
-            -DVCPKG_TARGET_TRIPLET=x64-windows-static `
             -DCMAKE_BUILD_TYPE=Release `
             -DCMAKE_CXX_FLAGS=/bigobj `
             -DSOUFFLE_DOMAIN_64BIT=ON `
-            -DCMAKE_MSVC_RUNTIME_LIBRARY="MultiThreaded" `
+            -DCMAKE_FIND_LIBRARY_PREFIXES=";lib" `
+            -DCMAKE_FIND_LIBRARY_SUFFIXES=".lib;.dll" `
             -DSOUFFLE_USE_CURSES=OFF `
             -DSOUFFLE_USE_ZLIB=ON `
             -DSOUFFLE_USE_SQLITE=ON `
@@ -69,7 +69,7 @@ jobs:
         working-directory: ${{ github.workspace }}
         run: cmake --build build --config Release -j4
 
-      - name: Collect artifacts (Static Binary)
+      - name: Collect artifacts
         working-directory: ${{ github.workspace }}
         shell: pwsh
         run: |
@@ -77,19 +77,15 @@ jobs:
           # Find where souffle.exe ended up (VS generator may or may not use Release/ subdirectory)
           $souffleDir = Split-Path -Parent (Get-ChildItem -Recurse -Filter "souffle.exe" build | Select-Object -First 1).FullName
           Write-Host "Found souffle.exe in: $souffleDir"
-          # Main executables (statically linked, no DLLs needed)
+          # Main executables
           Copy-Item "$souffleDir/souffle.exe" dist/
           Copy-Item "$souffleDir/souffleprof.exe" dist/
           # souffle-compile.py (needed for compiled mode)
           Copy-Item "build/src/souffle-compile.py" dist/
+          # DLLs that were copied next to the exe by CMake post-build steps
+          Copy-Item "$souffleDir/*.dll" dist/ -ErrorAction SilentlyContinue
           # Also grab the include directory for compiled souffle programs
           Copy-Item -Path "src/include" -Destination "dist/include" -Recurse -Force
-          # Verify static linking - show file size and dependency info
-          $souffleExe = "dist/souffle.exe"
-          Write-Host "=== Binary Info ==="
-          Write-Host "File size: $((Get-Item $souffleExe).Length / 1MB) MB"
-          Write-Host "=== Dependencies (should be minimal for static binary) ==="
-          # List any remaining DLL dependencies
 
       - name: Upload Windows artifact
         uses: actions/upload-artifact@v4
