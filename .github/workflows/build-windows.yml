@@ -1,0 +1,88 @@
+name: Build Windows Souffle
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - 'master'
+    tags:
+      - 'v*'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CHOCO_CACHE_DIR: "${{ github.workspace }}/choco-cache"
+
+jobs:
+  build-windows:
+    runs-on: windows-2025
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 1
+        fetch-tags: true
+
+    - name: Dependencies Cache
+      uses: actions/cache@v3
+      env:
+        cache-name: cache-chocolatey
+      with:
+        path: |
+          ${{ env.CHOCO_CACHE_DIR }}
+        key: windows-${{ hashFiles('choco-packages.config') }}
+
+    - name: Binary Dependencies (Chocolatey)
+      run: |
+        choco config set cacheLocation ${{ env.CHOCO_CACHE_DIR }}
+        choco install choco-packages.config --no-progress --installargs 'ADD_CMAKE_TO_PATH=System'
+
+    - name: Library Dependencies (vcpkg)
+      uses: lukka/run-vcpkg@v11
+      with:
+        vcpkgGitCommitId: '6f29f12e82a8293156836ad81cc9bf5af41fe836'
+
+    - name: Configure Build
+      working-directory: ${{ github.workspace }}
+      run: |
+        $env:ChocolateyInstall = Convert-Path "$((Get-Command choco).Path)\..\.."
+        Import-Module "$env:ChocolateyInstall\helpers\chocolateyProfile.psm1"
+        refreshenv
+        cmake -S . -B build -G "Visual Studio 17 2022" -A x64 `
+          "-DCMAKE_TOOLCHAIN_FILE=${{ env.VCPKG_ROOT }}/scripts/buildsystems/vcpkg.cmake" `
+          -DCMAKE_BUILD_TYPE=Release `
+          -DCMAKE_CXX_FLAGS=/bigobj `
+          -DSOUFFLE_DOMAIN_64BIT=ON `
+          -DCMAKE_FIND_LIBRARY_PREFIXES=";lib" `
+          -DCMAKE_FIND_LIBRARY_SUFFIXES=".lib;.dll" `
+          -DSOUFFLE_USE_CURSES=OFF `
+          -DSOUFFLE_USE_ZLIB=ON `
+          -DSOUFFLE_USE_SQLITE=ON `
+          -DCMAKE_FIND_DEBUG_MODE=FALSE `
+          -DSOUFFLE_BASH_COMPLETION=OFF
+
+    - name: Build
+      working-directory: ${{ github.workspace }}
+      run: cmake --build build --config Release -j4
+
+    - name: Collect artifacts
+      working-directory: ${{ github.workspace }}
+      run: |
+        mkdir -p dist
+        # Main executables
+        copy build/src/Release/souffle.exe dist/
+        copy build/src/Release/souffleprof.exe dist/
+        # souffle-compile.py (needed for compiled mode)
+        copy build/src/souffle-compile.py dist/
+        # DLLs that were copied next to the exe by CMake post-build steps
+        copy build/src/Release/*.dll dist/
+        # Also grab the include directory for compiled souffle programs
+        xcopy src\include dist\include\ /E /I /Y
+
+    - name: Upload Windows artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: souffle-windows-x64
+        path: dist/
+        retention-days: 30
