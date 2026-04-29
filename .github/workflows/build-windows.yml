@@ -14,6 +14,7 @@ concurrency:
 
 env:
   CHOCO_CACHE_DIR: "${{ github.workspace }}/choco-cache"
+  VCPKG_BINARY_SOURCES: "clear"
 
 jobs:
   build-windows:
