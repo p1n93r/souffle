@@ -1,23 +1,23 @@
-name: VS-CI-Tests
+name: Build Windows Souffle
 
 on:
-  pull_request:
-    types: [opened, synchronize]
   workflow_dispatch:
   push:
     branches:
       - 'master'
+    tags:
+      - 'v*'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
+  cancel-in-progress: true
 
 env:
   CHOCO_CACHE_DIR: "${{ github.workspace }}/choco-cache"
+  VCPKG_BINARY_SOURCES: "clear"
 
 jobs:
-
-  Windows-CMake-MSVC:
+  build-windows:
     runs-on: windows-2025
     steps:
     - uses: actions/checkout@v4
@@ -30,52 +30,62 @@ jobs:
       env:
         cache-name: cache-chocolatey
       with:
-        # cache Chocolatey packages to speed-up the deployment.
         path: |
           ${{ env.CHOCO_CACHE_DIR }}
         key: windows-${{ hashFiles('choco-packages.config') }}
 
-    # Use Chocolatey to install binary dependencies.
     - name: Binary Dependencies (Chocolatey)
       run: |
         choco config set cacheLocation ${{ env.CHOCO_CACHE_DIR }}
         choco install choco-packages.config --no-progress --installargs 'ADD_CMAKE_TO_PATH=System'
 
-    # Use vcpkg to install devel library dependencies.
-    - name: Library Dependencies (vcpkg)
-      uses: lukka/run-vcpkg@v11
-      with:
-        vcpkgGitCommitId: '6f29f12e82a8293156836ad81cc9bf5af41fe836'
-
-    - name: Create Build Directory
-      working-directory: ${{github.workspace}}
+    - name: Setup vcpkg
       run: |
-        mkdir build
+        git clone https://github.com/microsoft/vcpkg.git ${{ github.workspace }}/vcpkg
+        cd ${{ github.workspace }}/vcpkg
+        git checkout 6f29f12e82a8293156836ad81cc9bf5af41fe836
+        bootstrap-vcpkg.bat -disableMetrics
 
     - name: Configure Build
-      working-directory: ${{github.workspace}}
+      working-directory: ${{ github.workspace }}
       run: |
         $env:ChocolateyInstall = Convert-Path "$((Get-Command choco).Path)\..\.."
         Import-Module "$env:ChocolateyInstall\helpers\chocolateyProfile.psm1"
         refreshenv
-        cmake -S . -B build -G "Visual Studio 17 2022" -A x64 "-DCMAKE_TOOLCHAIN_FILE=${{env.VCPKG_ROOT}}/scripts/buildsystems/vcpkg.cmake" -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS=/bigobj -DSOUFFLE_DOMAIN_64BIT=ON -DCMAKE_FIND_LIBRARY_PREFIXES=";lib" -DCMAKE_FIND_LIBRARY_SUFFIXES=".lib;.dll" -DSOUFFLE_USE_CURSES=OFF -DSOUFFLE_USE_ZLIB=ON -DSOUFFLE_USE_SQLITE=ON -DCMAKE_FIND_DEBUG_MODE=FALSE -DSOUFFLE_BASH_COMPLETION=OFF
+        cmake -S . -B build -G "Visual Studio 17 2022" -A x64 `
+          "-DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake" `
+          -DCMAKE_BUILD_TYPE=Release `
+          -DCMAKE_CXX_FLAGS=/bigobj `
+          -DSOUFFLE_DOMAIN_64BIT=ON `
+          -DCMAKE_FIND_LIBRARY_PREFIXES=";lib" `
+          -DCMAKE_FIND_LIBRARY_SUFFIXES=".lib;.dll" `
+          -DSOUFFLE_USE_CURSES=OFF `
+          -DSOUFFLE_USE_ZLIB=ON `
+          -DSOUFFLE_USE_SQLITE=ON `
+          -DCMAKE_FIND_DEBUG_MODE=FALSE `
+          -DSOUFFLE_BASH_COMPLETION=OFF
 
     - name: Build
-      working-directory: ${{github.workspace}}
+      working-directory: ${{ github.workspace }}
       run: cmake --build build --config Release -j4
 
-    # Run the tests, Visual Studio must be in the environment because cl.exe is required for compiled Souffle.
-    - name: Check interpreter
-      working-directory: ${{github.workspace}}/build
-      shell: cmd
+    - name: Collect artifacts
+      working-directory: ${{ github.workspace }}
       run: |
-        pushd "%ProgramFiles%\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build" & call vcvars64.bat & popd
-        ctest --output-on-failure --build-config Release --progress -j4 -L interpreted
+        mkdir -p dist
+        # Main executables
+        copy build/src/Release/souffle.exe dist/
+        copy build/src/Release/souffleprof.exe dist/
+        # souffle-compile.py (needed for compiled mode)
+        copy build/src/souffle-compile.py dist/
+        # DLLs that were copied next to the exe by CMake post-build steps
+        copy build/src/Release/*.dll dist/
+        # Also grab the include directory for compiled souffle programs
+        xcopy src\include dist\include\ /E /I /Y
 
-    - name: Check others
-      working-directory: ${{github.workspace}}/build
-      shell: cmd
-      run: |
-        pushd "%ProgramFiles%\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build" & call vcvars64.bat & popd
-        ctest --output-on-failure --build-config Release --progress -j2 -LE interpreted
-
+    - name: Upload Windows artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: souffle-windows-x64
+        path: dist/
+        retention-days: 30
