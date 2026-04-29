@@ -20,76 +20,76 @@ jobs:
   build-windows:
     runs-on: windows-2025
     steps:
-    - uses: actions/checkout@v4
-      with:
-        fetch-depth: 1
-        fetch-tags: true
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          fetch-tags: true
 
-    - name: Dependencies Cache
-      uses: actions/cache@v3
-      env:
-        cache-name: cache-chocolatey
-      with:
-        path: |
-          ${{ env.CHOCO_CACHE_DIR }}
-        key: windows-${{ hashFiles('choco-packages.config') }}
+      - name: Dependencies Cache
+        uses: actions/cache@v3
+        env:
+          cache-name: cache-chocolatey
+        with:
+          path: |
+            ${{ env.CHOCO_CACHE_DIR }}
+          key: windows-${{ hashFiles('choco-packages.config') }}
 
-    - name: Binary Dependencies (Chocolatey)
-      run: |
-        choco config set cacheLocation ${{ env.CHOCO_CACHE_DIR }}
-        choco install choco-packages.config --no-progress --installargs 'ADD_CMAKE_TO_PATH=System'
+      - name: Binary Dependencies (Chocolatey)
+        run: |
+          choco config set cacheLocation ${{ env.CHOCO_CACHE_DIR }}
+          choco install choco-packages.config --no-progress --installargs 'ADD_CMAKE_TO_PATH=System'
 
-    - name: Setup vcpkg
-      run: |
-        git clone https://github.com/microsoft/vcpkg.git ${{ github.workspace }}/vcpkg
-        cd ${{ github.workspace }}/vcpkg
-        git checkout 6f29f12e82a8293156836ad81cc9bf5af41fe836
-        bootstrap-vcpkg.bat -disableMetrics
+      - name: Setup vcpkg
+        run: |
+          git clone https://github.com/microsoft/vcpkg.git ${{ github.workspace }}/vcpkg
+          cd ${{ github.workspace }}/vcpkg
+          git checkout 6f29f12e82a8293156836ad81cc9bf5af41fe836
+          bootstrap-vcpkg.bat -disableMetrics
 
-    - name: Configure Build
-      working-directory: ${{ github.workspace }}
-      run: |
-        $env:ChocolateyInstall = Convert-Path "$((Get-Command choco).Path)\..\.."
-        Import-Module "$env:ChocolateyInstall\helpers\chocolateyProfile.psm1"
-        refreshenv
-        cmake -S . -B build -G "Visual Studio 17 2022" -A x64 `
-          "-DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake" `
-          -DCMAKE_BUILD_TYPE=Release `
-          -DCMAKE_CXX_FLAGS=/bigobj `
-          -DSOUFFLE_DOMAIN_64BIT=ON `
-          -DCMAKE_FIND_LIBRARY_PREFIXES=";lib" `
-          -DCMAKE_FIND_LIBRARY_SUFFIXES=".lib;.dll" `
-          -DSOUFFLE_USE_CURSES=OFF `
-          -DSOUFFLE_USE_ZLIB=ON `
-          -DSOUFFLE_USE_SQLITE=ON `
-          -DCMAKE_FIND_DEBUG_MODE=FALSE `
-          -DSOUFFLE_BASH_COMPLETION=OFF
+      - name: Configure Build
+        working-directory: ${{ github.workspace }}
+        run: |
+          $env:ChocolateyInstall = Convert-Path "$((Get-Command choco).Path)\..\.."
+          Import-Module "$env:ChocolateyInstall\helpers\chocolateyProfile.psm1"
+          refreshenv
+          cmake -S . -B build -G "Visual Studio 17 2022" -A x64 `
+            "-DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake" `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DCMAKE_CXX_FLAGS=/bigobj `
+            -DSOUFFLE_DOMAIN_64BIT=ON `
+            -DCMAKE_FIND_LIBRARY_PREFIXES=";lib" `
+            -DCMAKE_FIND_LIBRARY_SUFFIXES=".lib;.dll" `
+            -DSOUFFLE_USE_CURSES=OFF `
+            -DSOUFFLE_USE_ZLIB=ON `
+            -DSOUFFLE_USE_SQLITE=ON `
+            -DCMAKE_FIND_DEBUG_MODE=FALSE `
+            -DSOUFFLE_BASH_COMPLETION=OFF
 
-    - name: Build
-      working-directory: ${{ github.workspace }}
-      run: cmake --build build --config Release -j4
+      - name: Build
+        working-directory: ${{ github.workspace }}
+        run: cmake --build build --config Release -j4
 
-    - name: Collect artifacts
-      working-directory: ${{ github.workspace }}
-      shell: pwsh
-      run: |
-        New-Item -ItemType Directory -Force -Path dist
-        # Find where souffle.exe ended up (VS generator may or may not use Release/ subdirectory)
-        $souffleDir = Split-Path -Parent (Get-ChildItem -Recurse -Filter "souffle.exe" build | Select-Object -First 1).FullName
-        Write-Host "Found souffle.exe in: $souffleDir"
-        # Main executables
-        Copy-Item "$souffleDir/souffle.exe" dist/
-        Copy-Item "$souffleDir/souffleprof.exe" dist/
-        # souffle-compile.py (needed for compiled mode)
-        Copy-Item "build/src/souffle-compile.py" dist/
-        # DLLs that were copied next to the exe by CMake post-build steps
-        Copy-Item "$souffleDir/*.dll" dist/ -ErrorAction SilentlyContinue
-        # Also grab the include directory for compiled souffle programs
-        Copy-Item -Path "src/include" -Destination "dist/include" -Recurse -Force
+      - name: Collect artifacts
+        working-directory: ${{ github.workspace }}
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist
+          # Find where souffle.exe ended up (VS generator may or may not use Release/ subdirectory)
+          $souffleDir = Split-Path -Parent (Get-ChildItem -Recurse -Filter "souffle.exe" build | Select-Object -First 1).FullName
+          Write-Host "Found souffle.exe in: $souffleDir"
+          # Main executables
+          Copy-Item "$souffleDir/souffle.exe" dist/
+          Copy-Item "$souffleDir/souffleprof.exe" dist/
+          # souffle-compile.py (needed for compiled mode)
+          Copy-Item "build/src/souffle-compile.py" dist/
+          # DLLs that were copied next to the exe by CMake post-build steps
+          Copy-Item "$souffleDir/*.dll" dist/ -ErrorAction SilentlyContinue
+          # Also grab the include directory for compiled souffle programs
+          Copy-Item -Path "src/include" -Destination "dist/include" -Recurse -Force
 
-    - name: Upload Windows artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: souffle-windows-x64
-        path: dist/
-        retention-days: 30
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: souffle-windows-x64
+          path: dist/
+          retention-days: 30
