@@ -39,10 +39,12 @@ jobs:
         choco config set cacheLocation ${{ env.CHOCO_CACHE_DIR }}
         choco install choco-packages.config --no-progress --installargs 'ADD_CMAKE_TO_PATH=System'
 
-    - name: Library Dependencies (vcpkg)
-      uses: lukka/run-vcpkg@v11
-      with:
-        vcpkgGitCommitId: '6f29f12e82a8293156836ad81cc9bf5af41fe836'
+    - name: Setup vcpkg
+      run: |
+        git clone https://github.com/microsoft/vcpkg.git ${{ github.workspace }}/vcpkg
+        cd ${{ github.workspace }}/vcpkg
+        git checkout 6f29f12e82a8293156836ad81cc9bf5af41fe836
+        bootstrap-vcpkg.bat -disableMetrics
 
     - name: Configure Build
       working-directory: ${{ github.workspace }}
@@ -51,7 +53,7 @@ jobs:
         Import-Module "$env:ChocolateyInstall\helpers\chocolateyProfile.psm1"
         refreshenv
         cmake -S . -B build -G "Visual Studio 17 2022" -A x64 `
-          "-DCMAKE_TOOLCHAIN_FILE=${{ env.VCPKG_ROOT }}/scripts/buildsystems/vcpkg.cmake" `
+          "-DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake" `
           -DCMAKE_BUILD_TYPE=Release `
           -DCMAKE_CXX_FLAGS=/bigobj `
           -DSOUFFLE_DOMAIN_64BIT=ON `
@@ -69,17 +71,21 @@ jobs:
 
     - name: Collect artifacts
       working-directory: ${{ github.workspace }}
+      shell: pwsh
       run: |
-        mkdir -p dist
+        New-Item -ItemType Directory -Force -Path dist
+        # Find where souffle.exe ended up (VS generator may or may not use Release/ subdirectory)
+        $souffleDir = Split-Path -Parent (Get-ChildItem -Recurse -Filter "souffle.exe" build | Select-Object -First 1).FullName
+        Write-Host "Found souffle.exe in: $souffleDir"
         # Main executables
-        copy build/src/Release/souffle.exe dist/
-        copy build/src/Release/souffleprof.exe dist/
+        Copy-Item "$souffleDir/souffle.exe" dist/
+        Copy-Item "$souffleDir/souffleprof.exe" dist/
         # souffle-compile.py (needed for compiled mode)
-        copy build/src/souffle-compile.py dist/
+        Copy-Item "build/src/souffle-compile.py" dist/
         # DLLs that were copied next to the exe by CMake post-build steps
-        copy build/src/Release/*.dll dist/
+        Copy-Item "$souffleDir/*.dll" dist/ -ErrorAction SilentlyContinue
         # Also grab the include directory for compiled souffle programs
-        xcopy src\include dist\include\ /E /I /Y
+        Copy-Item -Path "src/include" -Destination "dist/include" -Recurse -Force
 
     - name: Upload Windows artifact
       uses: actions/upload-artifact@v4
