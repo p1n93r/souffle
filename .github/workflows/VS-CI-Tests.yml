@@ -1,4 +1,4 @@
-name: Build Windows Souffle
+name: VS-CI-Tests
 
 on:
   workflow_dispatch:
