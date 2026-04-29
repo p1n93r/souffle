@@ -19,6 +19,8 @@ env:
 jobs:
   build-windows:
     runs-on: windows-2025
+    env:
+      VCPKG_TARGET_TRIPLET: x64-windows-static
     steps:
       - uses: actions/checkout@v4
         with:
@@ -54,7 +56,8 @@ jobs:
           refreshenv
           cmake -S . -B build -G "Visual Studio 17 2022" -A x64 `
             "-DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake" `
-            -DVCPKG_TARGET_TRIPLET=x64-windows-static `
+            "-DVCPKG_TARGET_TRIPLET=$env:VCPKG_TARGET_TRIPLET" `
+            -DVCPKG_APPLOCAL_PACKAGES=OFF `
             -DCMAKE_BUILD_TYPE=Release `
             -DCMAKE_CXX_FLAGS=/bigobj `
             -DSOUFFLE_DOMAIN_64BIT=ON `
@@ -62,6 +65,7 @@ jobs:
             -DSOUFFLE_USE_CURSES=OFF `
             -DSOUFFLE_USE_ZLIB=ON `
             -DSOUFFLE_USE_SQLITE=ON `
+            -DSOUFFLE_USE_LIBFFI=OFF `
             -DCMAKE_FIND_DEBUG_MODE=FALSE `
             -DSOUFFLE_BASH_COMPLETION=OFF
 

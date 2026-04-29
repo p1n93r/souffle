@@ -341,9 +341,9 @@ endif()
 
 # Copy the dlls in the same directory as Souffle so that they will
 # be immediately found by the operating system.
-# Skip this for static linking (MSVC static runtime /MT or vcpkg static triplet)
+# Skip this for static linking (x64-windows-static triplet or /MT runtime)
 
-if (WIN32 AND NOT (CMAKE_MSVC_RUNTIME_LIBRARY MATCHES "^MultiThreaded" OR VCPKG_TARGET_TRIPLET MATCHES "static"))
+if (WIN32 AND NOT VCPKG_TARGET_TRIPLET MATCHES "static")
   if (SOUFFLE_USE_SQLITE)
     add_custom_command(TARGET souffle POST_BUILD
       COMMAND ${CMAKE_COMMAND} -E copy_if_different
